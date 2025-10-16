@@ -1,0 +1,35 @@
+# --- Go build artifacts ---
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# --- Go modules / workspace ---
+vendor/
+go.work.sum
+
+# --- IDE / editors ---
+.vscode/
+.idea/
+*.iml
+
+# --- Logs / temp files ---
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# --- System files ---
+.DS_Store
+Thumbs.db
+
+# --- Project-specific ---
+# build outputs (если делаешь go build -o ...)
+build/
+dist/
+out/
