@@ -6,3 +6,4 @@ Homework for the course [Development of web services on Go](https://stepik.org/c
 
 - `1/tree` - implementation of the `tree` utility
 - `2/signer` - analog of the unix pipeline with parallel processing
+- `3/optimize` - optimizing a function using a profiler
