@@ -57,30 +57,25 @@ func SearchServer(w http.ResponseWriter, r *http.Request) {
 
 	users, err := users(query, orderField, orderBy, limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		if errors.Is(err, errBadOrderField) {
+			_ = json.NewEncoder(w).Encode(SearchErrorResponse{Error: "ErrorBadOrderField"})
+		} else {
+			_ = json.NewEncoder(w).Encode(SearchErrorResponse{Error: err.Error()})
+		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(users)
+	_ = json.NewEncoder(w).Encode(users)
 
 }
 
-/*
-func main() {
-
-	http.HandleFunc("/", SearchServer)
-
-	fmt.Println("Listening on port 8080")
-
-	err := http.ListenAndServe(":8080", nil)
-	if err != nil {
-		fmt.Printf("Error starting server: %s\n", err)
-	}
-}*/
-
 type lessFunc func(i, j int) bool
+
+var errBadOrderField = errors.New("bad order_field")
 
 func users(query, orderField string, orderBy, limit, offset int) ([]User, error) {
 
@@ -114,7 +109,7 @@ func users(query, orderField string, orderBy, limit, offset int) ([]User, error)
 					Id:     userRaw.Id,
 					Name:   name,
 					Age:    userRaw.Age,
-					About:  userRaw.About,
+					About:  strings.TrimSpace(userRaw.About), // cut \n, \r and spaces in the end
 					Gender: userRaw.Gender,
 				})
 		}
@@ -130,7 +125,7 @@ func users(query, orderField string, orderBy, limit, offset int) ([]User, error)
 	case "id":
 		less = func(i, j int) bool { return users[i].Id < users[j].Id }
 	default:
-		return nil, errors.New(ErrorBadOrderField)
+		return nil, errBadOrderField
 	}
 
 	switch orderBy {
@@ -203,8 +198,8 @@ func TestSearchClient_FindUsers(t *testing.T) {
 				Query:      "Boydd",
 				Limit:      10,
 				Offset:     0,
-				OrderField: "",
-				OrderBy:    10,
+				OrderField: "About",
+				OrderBy:    0,
 			},
 			Response: SearchResponse{
 				Users:    []User{},
@@ -215,6 +210,7 @@ func TestSearchClient_FindUsers(t *testing.T) {
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(SearchServer))
+	defer ts.Close()
 
 	for i, testCase := range cases {
 		sc := &SearchClient{
@@ -224,17 +220,24 @@ func TestSearchClient_FindUsers(t *testing.T) {
 
 		result, err := sc.FindUsers(testCase.Request)
 
-		if err != nil && !testCase.IsError {
-			t.Errorf("[%d]: Expected no error, got %s", i, err)
-		}
-		if err == nil && testCase.IsError {
-			t.Errorf("[%d]: Expected error, got no error", i)
+		// unexpected error
+		if err != nil {
+			if !testCase.IsError {
+				t.Errorf("[%d]: Expected no error, got %s", i, err)
+			}
+			continue
 		}
 
+		// no expected error
+		if testCase.IsError {
+			t.Errorf("[%d]: Expected error, got no error", i)
+			continue
+		}
+
+		// only if err == nil, check results
 		if len(result.Users) != len(testCase.Response.Users) {
 			t.Errorf("[%d]: Expected %d users, got %d", i, len(testCase.Response.Users), len(result.Users))
 		}
-
 		for i, user := range result.Users {
 			if !reflect.DeepEqual(user, testCase.Response.Users[i]) {
 				t.Errorf("[%d]: Expected User %v, got %v", i, testCase.Response.Users[i], user)
