@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 type UserRaw struct {
@@ -177,11 +178,11 @@ func TestSearchClient_FindUsers(t *testing.T) {
 				Limit:      10,
 				Offset:     0,
 				OrderField: "",
-				OrderBy:    0,
+				OrderBy:    OrderByAsIs,
 			},
 			Response: SearchResponse{
 				Users: []User{
-					User{
+					{
 						Id:     0,
 						Name:   "Boyd Wolf",
 						Age:    22,
@@ -193,19 +194,105 @@ func TestSearchClient_FindUsers(t *testing.T) {
 			},
 			IsError: false,
 		},
+
+		{
+			Request: SearchRequest{
+				Query:      "et ea",
+				Limit:      10,
+				Offset:     0,
+				OrderField: "",
+				OrderBy:    OrderByDesc,
+			},
+			Response: SearchResponse{
+				Users: []User{
+					{
+						Id:     33,
+						Name:   "Twila Snow",
+						Age:    36,
+						About:  "Sint non sunt adipisicing sit laborum cillum magna nisi exercitation. Dolore officia esse dolore officia ea adipisicing amet ea nostrud elit cupidatat laboris. Proident culpa ullamco aute incididunt aute. Laboris et nulla incididunt consequat pariatur enim dolor incididunt adipisicing enim fugiat tempor ullamco. Amet est ullamco officia consectetur cupidatat non sunt laborum nisi in ex. Quis labore quis ipsum est nisi ex officia reprehenderit ad adipisicing fugiat. Labore fugiat ea dolore exercitation sint duis aliqua.",
+						Gender: "female",
+					},
+					{
+						Id:     7,
+						Name:   "Leann Travis",
+						Age:    34,
+						About:  "Lorem magna dolore et velit ut officia. Cupidatat deserunt elit mollit amet nulla voluptate sit. Quis aute aliquip officia deserunt sint sint nisi. Laboris sit et ea dolore consequat laboris non. Consequat do enim excepteur qui mollit consectetur eiusmod laborum ut duis mollit dolor est. Excepteur amet duis enim laborum aliqua nulla ea minim.",
+						Gender: "female",
+					},
+				},
+				NextPage: false,
+			},
+			IsError: false,
+		},
+
 		{
 			Request: SearchRequest{
 				Query:      "Boydd",
 				Limit:      10,
 				Offset:     0,
 				OrderField: "About",
-				OrderBy:    0,
+				OrderBy:    OrderByAsIs,
 			},
 			Response: SearchResponse{
 				Users:    []User{},
 				NextPage: false,
 			},
 			IsError: true,
+		},
+		{
+			Request: SearchRequest{
+				Query:      "Boydd",
+				Limit:      -1,
+				Offset:     0,
+				OrderField: "",
+				OrderBy:    OrderByAsIs,
+			},
+			Response: SearchResponse{},
+			IsError:  true,
+		},
+		{
+			Request: SearchRequest{
+				Query:      "Boydd",
+				Limit:      26,
+				Offset:     0,
+				OrderField: "",
+				OrderBy:    OrderByAsIs,
+			},
+			Response: SearchResponse{},
+			IsError:  false,
+		},
+		{
+			Request: SearchRequest{
+				Query:      "Boydd",
+				Limit:      10,
+				Offset:     -10,
+				OrderField: "",
+				OrderBy:    OrderByAsIs,
+			},
+			Response: SearchResponse{},
+			IsError:  true,
+		},
+		{
+			Request: SearchRequest{
+				Query:      "", // можно оставить как есть
+				Limit:      1,  // будет обрезан до 25
+				Offset:     0,
+				OrderField: "",
+				OrderBy:    OrderByAsIs,
+			},
+			Response: SearchResponse{
+				Users: []User{
+					{
+						Id:     0,
+						Name:   "Boyd Wolf",
+						Age:    22,
+						About:  "Nulla cillum enim voluptate consequat laborum esse excepteur occaecat commodo nostrud excepteur ut cupidatat. Occaecat minim incididunt ut proident ad sint nostrud ad laborum sint pariatur. Ut nulla commodo dolore officia. Consequat anim eiusmod amet commodo eiusmod deserunt culpa. Ea sit dolore nostrud cillum proident nisi mollit est Lorem pariatur. Lorem aute officia deserunt dolor nisi aliqua consequat nulla nostrud ipsum irure id deserunt dolore. Minim reprehenderit nulla exercitation labore ipsum.",
+						Gender: "male",
+					},
+				},
+				NextPage: true,
+			},
+			IsError: false,
 		},
 	}
 
@@ -245,5 +332,140 @@ func TestSearchClient_FindUsers(t *testing.T) {
 		}
 
 	}
+
+}
+
+func timeoutErrorHandler(w http.ResponseWriter, r *http.Request) {
+	time.Sleep(2 * time.Second)
+}
+
+func unauthorizedErrorHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusUnauthorized)
+}
+
+func internalErrorHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusInternalServerError)
+}
+
+func badRequestErrorHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusBadRequest)
+	w.Write([]byte("`Bad Request}`"))
+}
+
+func unknownBadRequestHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(SearchErrorResponse{Error: "SomethingElse"})
+}
+
+func cantUnpackJSONErrorHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode("`Not encodable json}`")
+}
+
+func TestSearchClient_FindUsers_Errors(t *testing.T) {
+
+	t.Run("timeout", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(timeoutErrorHandler))
+		defer ts.Close()
+
+		sc := &SearchClient{
+			URL:         ts.URL,
+			AccessToken: "token",
+		}
+		_, err := sc.FindUsers(SearchRequest{})
+		if err == nil || !strings.Contains(err.Error(), "timeout for") {
+			t.Errorf("expected timeout error, got %v", err)
+		}
+	})
+
+	t.Run("unknown", func(t *testing.T) {
+
+		sc := &SearchClient{
+			URL:         "http://localhost:8888888",
+			AccessToken: "token",
+		}
+		_, err := sc.FindUsers(SearchRequest{})
+		if err == nil || !strings.Contains(err.Error(), "unknown error") {
+			t.Errorf("expected unknown error, got %v", err)
+		}
+	})
+
+	t.Run("unauthorized", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(unauthorizedErrorHandler))
+		defer ts.Close()
+
+		sc := &SearchClient{
+			URL:         ts.URL,
+			AccessToken: "token",
+		}
+
+		_, err := sc.FindUsers(SearchRequest{})
+		if err == nil || !strings.Contains(err.Error(), "Bad AccessToken") {
+			t.Errorf("expected Bad AccessToken, got %v", err)
+		}
+
+	})
+
+	t.Run("internal_server_error", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(internalErrorHandler))
+		defer ts.Close()
+
+		sc := &SearchClient{
+			URL:         ts.URL,
+			AccessToken: "token",
+		}
+
+		_, err := sc.FindUsers(SearchRequest{})
+		if err == nil || !strings.Contains(err.Error(), "SearchServer fatal error") {
+			t.Errorf("expected SearchServer fatal error, got %v", err)
+		}
+	})
+
+	t.Run("cant unpack error json", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(badRequestErrorHandler))
+		defer ts.Close()
+
+		sc := &SearchClient{
+			URL:         ts.URL,
+			AccessToken: "token",
+		}
+
+		_, err := sc.FindUsers(SearchRequest{})
+		if err == nil || !strings.Contains(err.Error(), "cant unpack error json") {
+			t.Errorf("expected cant unpack error json, got %v", err)
+		}
+	})
+
+	t.Run("unknown bad request error", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(unknownBadRequestHandler))
+		defer ts.Close()
+
+		sc := &SearchClient{
+			URL:         ts.URL,
+			AccessToken: "token",
+		}
+
+		_, err := sc.FindUsers(SearchRequest{})
+		if err == nil || !strings.Contains(err.Error(), "unknown bad request error") {
+			t.Errorf("expected unknown bad request error, got %v", err)
+		}
+	})
+
+	t.Run("cant unpack result json", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(cantUnpackJSONErrorHandler))
+		defer ts.Close()
+
+		sc := &SearchClient{
+			URL:         ts.URL,
+			AccessToken: "token",
+		}
+
+		_, err := sc.FindUsers(SearchRequest{})
+		if err == nil || !strings.Contains(err.Error(), "cant unpack result json") {
+			t.Errorf("expected cant unpack result json, got %v", err)
+		}
+
+	})
 
 }
